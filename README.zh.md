@@ -2,134 +2,151 @@
 
 [English](README.md) | 中文
 
-一个 **DeepSeek Harness 插件**：给 agent 装上 `video-digest` 技能，把本地视频变成
-**少量关键帧 + 一张带时间码的拼图**，多模态模型就能真正"看"视频并回答
-"这个视频讲了什么"。
+一个 **DeepSeek Harness 插件**：给 agent 装上 `video-digest` 技能。三层能力，按需组合，
+让聊天模型真正"读"得懂视频：
+
+| 层 | 拿到什么 | 命令 | 需要 |
+| --- | --- | --- | --- |
+| 1 | **画面**：场景变化关键帧 + 一张拼图 | `frames` | `av`、`numpy`、`pillow` |
+| 2 | **声音**：本地语音转写，带时间戳 | `transcribe` | `+ faster-whisper`（可选） |
+| 3 | **画面硬字幕**：去重后的字幕条 | `captions` | `av`、`numpy`、`pillow` |
 
 **不需要系统装 ffmpeg**：解码走 [PyAV](https://github.com/PyAV-Org/PyAV)，它自带 FFmpeg 库。
-
-```
-视频文件 ──► 探测元数据 ──► 采样 N 帧 ──► 场景变化打分 ──► 取 K 张关键帧
-                                                              │
-                         contact_sheet.jpg  ◄──────────────────┤
-                         frames/*.jpg（带时间码）                │
-                         summary.json                          │
-                                                              ▼
-                                                模型读拼图 → 输出时间轴摘要
-```
-
-## 为什么需要它
-
-聊天模型看不了视频。工业界的通用做法正是**抽帧 + 变化检测 + 看图**：一分钟的片段，
-9 张关键帧加一张拼图就足以概括；录屏、教学、游戏录像、监控、PPT 讲解都适用。
-
-## 装好之后你得到什么
-
-- 会话技能目录里多出一个 `video-digest` 技能（安装后自动发现，不用重启理解系统）。
-- `skills/video-digest/scripts/video_digest.py`：三种模式 `info` / `frames` / `audio`。
-- `dsh-video-digest` 命令行包装，方便在 DSH 之外先验证环境。
-
-## 环境要求
-
-| 依赖 | 说明 |
-| --- | --- |
-| DeepSeek Harness `0.2.1+` | 本插件是 bundle（`dsh.bundle.patch`） |
-| Node.js `>=22.12.0` | 宿主运行时 |
-| Python `3.9+` | 跑抽帧脚本 |
-| `av`、`numpy`、`Pillow` | `python -m pip install av`（PyAV 自带 FFmpeg） |
-
-插件本身**没有** npm 运行时依赖。
+语音转写用 [faster-whisper](https://github.com/SYSTRAN/faster-whisper)，**纯本地**，不上传。
 
 ## 安装
 
-### 从 GitHub 安装（推荐）
+**DSH 侧**：从 GitHub 装 bundle：
 
-编辑 `~/.dsh/profiles/<profile>/package.json`：
-
-```json
+```jsonc
+// ~/.dsh/profiles/<profile>/package.json
 {
-  "dependencies": {
-    "dsh-video-digest": "github:Snutree/dsh-video-digest"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": ["...", "dsh-video-digest"]
-    }
-  }
+  "dependencies": { "dsh-video-digest": "github:Snutree/dsh-video-digest" },
+  "dsh": { "profile": { "bundles": ["...", "dsh-video-digest"] } }
 }
 ```
 
-然后在 DSH 插件管理器里重新安装该 bundle（或让它重装 profile 依赖）。
+或在插件管理器里安装 `github:Snutree/dsh-video-digest`。
 
-### 从本地 tgz 安装
+**Python 侧**：一条命令备齐依赖：
 
 ```bash
-npm pack
-# DSH 插件管理器 -> 安装 bundle -> file:/绝对路径/dsh-video-digest-0.1.0.tgz
+python skills/video-digest/scripts/video_digest.py doctor    # 看缺什么
+python skills/video-digest/scripts/video_digest.py setup --with-asr
+# 国内网络慢：加 --mirror https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+`setup` 装 `av`/`numpy`/`pillow`（1、3 层）；加 `--with-asr` 再装 `faster-whisper`（2 层）。
+模型在首次 `transcribe` 时自动下载。
 
 ## 使用
 
-任意会话里直接说：
+任意会话里直接问：
 
-> 帮我总结一下 D:\videos\lesson.mp4
+> 这个视频讲了什么故事？`D:\videos\clip.mp4`
 
-agent 会加载技能，先 `info` 再 `frames`，读 `contact_sheet.jpg`，最后给出时间轴表格。
-
-也可以手动跑：
+技能会自己选层、执行、读产物，最后给时间轴摘要。也可以手动跑：
 
 ```bash
-python skills/video-digest/scripts/video_digest.py info   "D:\videos\lesson.mp4"
-python skills/video-digest/scripts/video_digest.py frames "D:\videos\lesson.mp4" --samples 200 --shots 12
-python skills/video-digest/scripts/video_digest.py audio  "D:\videos\lesson.mp4"
+S=skills/video-digest/scripts/video_digest.py
+
+python $S info       "D:\v.mp4"
+python $S frames     "D:\v.mp4" --samples 200 --shots 12
+python $S transcribe "D:\v.mp4" --model small --language zh
+python $S captions   "D:\v.mp4" --step 0.6
+python $S audio      "D:\v.mp4"
 ```
 
-或通过包内 CLI：
+也可以用包内 CLI（自动找 Python）：
 
 ```bash
-npx dsh-video-digest info "D:\videos\lesson.mp4"
+npx dsh-video-digest transcribe "D:\v.mp4" --language zh
 ```
 
-### 参数
+## 命令说明
+
+### `doctor` / `setup`
+
+| 参数 | 含义 |
+| --- | --- |
+| `doctor --json` | 机器可读的依赖报告 |
+| `setup --with-asr` | 装核心依赖 + ASR 依赖 |
+| `setup --mirror URL` | pip 镜像 |
+| `setup --force` | 已装也重装 |
+
+### `frames`
 
 | 参数 | 默认 | 含义 |
 | --- | --- | --- |
-| `--samples` | 120 | 参与打分的采样帧数（越大变化检测越准、越慢） |
-| `--shots` | 9 | 实际导出的关键帧数 |
-| `--start` / `--end` | 全片 | 只处理某一段（秒） |
-| `--out` | `./video-digest/<名字>` | 输出目录 |
-| `--json` | 关 | 输出机器可读 JSON |
+| `--samples` | 120 | 参与打分的采样帧数 |
+| `--shots` | 9 | 导出的关键帧数 |
+| `--start` / `--end` | 全片 | 只处理某段（秒） |
+| `--max-width` | 1280 | 关键帧宽度上限 |
+| `--json` | 关 | 机器可读输出 |
 
-参考耗时：1 分钟 1080p ≈ 10 秒；10 分钟 ≈ 40 秒（普通桌面）。
+### `transcribe`
+
+| 参数 | 默认 | 含义 |
+| --- | --- | --- |
+| `--model` | `small` | `base` 快而糙 · `small` 推荐 · `medium`/`large-v3` 更准更慢 |
+| `--language` | 自动 | 中文用 `zh` |
+| `--device` | `cpu` | 有 N 卡用 `cuda` |
+| `--compute-type` | `int8` | GPU 上用 `float16` |
+| `--prompt` | 无 | initial prompt，改善标点与上下文 |
+| `--start` / `--end` | 全片 | 时间戳保持绝对时间 |
+
+模型下载体积：`base` ≈ 145MB、`small` ≈ 460MB、`medium` ≈ 1.5GB。
+CPU 参考速度：5–6 分钟音频 + `small` int8 ≈ 1–3 分钟。
+
+### `captions`
+
+抽取"烧在画面上"的字幕，适合"游戏画面 + 硬字幕"这类短视频。
+参数：`--step 0.6`、`--band-top 0.66`、`--band-bottom 0.995`、`--min-pixels 400`、
+`--diff 0.30`、`--per-sheet 8`。白色 HUD 数字会造成误检，可调大 `--min-pixels`/`--diff`
+或收窄条带。
 
 ## 产物
 
 ```
 <out>/
   frames/frame_01_000008213ms.jpg   # 带时间码的关键帧
-  contact_sheet.jpg                 # 3 列拼图，每格带时间码
-  summary.json                      # 元数据 + 每帧时间/分数/路径
-  audio_16k_mono.wav                # 仅 audio 模式
+  contact_sheet.jpg                 # 3 列拼图
+  summary.json                      # 元数据 + 每帧时间/分数
+  audio_16k_mono.wav                # 16k 单声道（ASR 输入）
+  transcript_small.txt / .json      # [起-止] 文本分段
+  captions/subs_01.jpg …            # 字幕条拼表
+  captions/captions.json            # 字幕时间清单
 ```
+
+## 为什么是三层
+
+聊天模型既看不了视频也听不到声音，诚实的拆法就是：
+
+- **画面**：采样 → 打分 → 只给模型看少量图；
+- **声音**：本地转写 → 给模型带时间码的文本；
+- **硬字幕**：文字已经在画面上时直接抽，不用下模型、可离线。
+
+技能里写清了怎么选层，并禁止模型编造没观察到的内容。
 
 ## 已知限制
 
-- **只做画面。** 插件不含语音转写；音轨导出为 16 kHz 单声道 WAV，交给 Whisper 等 ASR。
-  技能里明确禁止模型编造对话内容。
-- 关键帧是离散的：帧与帧之间的运动没被观察。技能要求模型如实说明，而不是脑补。
-- 场景打分是直方图 + 像素差的启发式：切镜头和强运动很准，静止画面需要调大 `--shots`。
-- 暂不支持 GPU 加速、OCR 回退、内嵌字幕提取。
+- 关键帧是离散的，帧间运动没被观察；技能要求模型如实说明，不许脑补。
+- ASR 是模型，同音字/专有名词会错；引用要当原始素材，用上下文或画面校订。
+- `captions` 用亮度/饱和度启发式，游戏 HUD 会误检。
+- 不要求 GPU，但默认也没开 GPU 加速。
+- 转写全程本地、不上传，但文本会落盘；私密素材用完记得清理。
 
 ## 开发
 
 ```bash
-npm pack                    # 产出 dsh-video-digest-0.1.0.tgz
-node --check lib/index.js   # 插件入口是纯 ESM，无构建步骤
+npm pack
+node --check lib/index.js
 python -m py_compile skills/video-digest/scripts/video_digest.py
+python skills/video-digest/scripts/video_digest.py doctor
 ```
 
-本地循环：用插件管理器装 tgz，然后让 agent 总结一个视频。技能正文在
-`skills/video-digest/SKILL.md`，改完重装即生效。
+技能正文在 `skills/video-digest/SKILL.md`；插件入口 `lib/index.js` 把技能注册进
+`ctx.skills`，并把包内 `skills/video-digest` 目录作为 `resourceBase`。
 
 ## 许可证
 

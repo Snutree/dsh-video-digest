@@ -1,7 +1,7 @@
 {
   "name": "dsh-video-digest",
-  "version": "0.1.0",
-  "description": "视频快速提炼：探测元数据、按场景变化抽关键帧、生成带时间码的拼图交给多模态 agent 看，可导出音轨给 ASR。给 DeepSeek Harness 增加 video-digest 技能。",
+  "version": "0.2.0",
+  "description": "视频快速提炼：抽关键帧拼图、本地语音转写（faster-whisper）、画面硬字幕抽取，三层能力给 agent 读视频。给 DeepSeek Harness 增加 video-digest 技能。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -18,6 +18,7 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "keywords": [

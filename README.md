@@ -2,144 +2,157 @@
 
 [English](README.md) | [中文](README.zh.md)
 
-A **DeepSeek Harness plugin** that gives your agent a `video-digest` skill: it turns a local
-video file into a handful of keyframes plus one contact sheet, so a multimodal model can
-actually "read" the video — with timecodes — and answer "what happens in this video?".
+A **DeepSeek Harness plugin** that gives your agent a `video-digest` skill. Three layers,
+composable, so a chat model can actually "read" a video:
+
+| Layer | What it gives you | Command | Needs |
+| --- | --- | --- | --- |
+| 1 | **Picture** — scene-change keyframes + one contact sheet | `frames` | `av`, `numpy`, `pillow` |
+| 2 | **Sound** — local speech-to-text with timestamps | `transcribe` | `+ faster-whisper` (optional) |
+| 3 | **Burned-in subtitles** — deduplicated caption strips | `captions` | `av`, `numpy`, `pillow` |
 
 No ffmpeg CLI required: decoding goes through [PyAV](https://github.com/PyAV-Org/PyAV),
-which ships its own FFmpeg libraries.
-
-```
-video file ──► probe ──► sample N frames ──► scene-change score ──► top K keyframes
-                                                                        │
-                              contact_sheet.jpg  ◄──────────────────────┤
-                              frames/*.jpg (timecoded)                  │
-                              summary.json                              │
-                                                                        ▼
-                                                        model reads the sheet,
-                                                        writes a timeline digest
-```
-
-## Why
-
-Chat models can't watch video. The standard trick — and what this plugin automates — is
-**frame sampling + change detection + visual reading**. Nine frames and one contact sheet
-are enough to summarise a one-minute clip, and it works for screen recordings, tutorials,
-gameplay, surveillance footage and slide decks alike.
-
-## What you get
-
-- A `video-digest` skill registered into the session skill catalog (auto-discovered, no
-  restart of the app required after install).
-- `skills/video-digest/scripts/video_digest.py` — zero-dependency-on-ffmpeg CLI with three
-  modes: `info`, `frames`, `audio`.
-- `dsh-video-digest` bin wrapper for testing outside DSH.
-
-## Requirements
-
-| Dependency | Notes |
-| --- | --- |
-| DeepSeek Harness `0.2.1+` | plugin is a bundle (`dsh.bundle.patch`) |
-| Node.js `>=22.12.0` | host runtime |
-| Python `3.9+` | for the extraction script |
-| `av`, `numpy`, `Pillow` | `python -m pip install av` (PyAV bundles FFmpeg) |
-
-The plugin itself has no runtime npm dependencies.
+which ships its own FFmpeg libraries. ASR runs **locally** via
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) — nothing is uploaded.
 
 ## Install
 
-### From GitHub (recommended)
+**In DSH**, install the bundle from GitHub:
 
-Add to `~/.dsh/profiles/<profile>/package.json`:
-
-```json
+```jsonc
+// ~/.dsh/profiles/<profile>/package.json
 {
-  "dependencies": {
-    "dsh-video-digest": "github:Snutree/dsh-video-digest"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": ["...", "dsh-video-digest"]
-    }
-  }
+  "dependencies": { "dsh-video-digest": "github:Snutree/dsh-video-digest" },
+  "dsh": { "profile": { "bundles": ["...", "dsh-video-digest"] } }
 }
 ```
 
-then reinstall profile dependencies (the DSH plugin manager does this for you when you
-install a bundle from a spec).
+or, in the plugin manager, install `github:Snutree/dsh-video-digest`.
 
-### From a local tarball
+**Python side**, one command prepares everything:
 
 ```bash
-npm pack
-# then in the DSH plugin manager: install bundle  ->  file:/absolute/path/dsh-video-digest-0.1.0.tgz
+python skills/video-digest/scripts/video_digest.py doctor    # what is missing
+python skills/video-digest/scripts/video_digest.py setup --with-asr
+# slow network in CN: add --mirror https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+`setup` installs `av`, `numpy`, `pillow` (layer 1/3) and, with `--with-asr`,
+`faster-whisper` (layer 2). Models download automatically on first `transcribe`.
 
 ## Use
 
-In any session:
+Just ask in any session:
 
-> 帮我总结一下 D:\videos\lesson.mp4
+> 这个视频讲了什么故事？`D:\videos\clip.mp4`
 
-The agent loads the skill, runs `info` then `frames`, reads `contact_sheet.jpg`, and answers
-with a timeline table. You can also drive the script directly:
-
-```bash
-python skills/video-digest/scripts/video_digest.py info   "D:\videos\lesson.mp4"
-python skills/video-digest/scripts/video_digest.py frames "D:\videos\lesson.mp4" --samples 200 --shots 12
-python skills/video-digest/scripts/video_digest.py audio  "D:\videos\lesson.mp4"
-```
-
-Or through the bundled bin:
+The skill picks the right layer, runs it, reads the artifacts, and answers with a timeline.
+Manual use:
 
 ```bash
-npx dsh-video-digest info "D:\videos\lesson.mp4"
+S=skills/video-digest/scripts/video_digest.py
+
+python $S info       "D:\v.mp4"
+python $S frames     "D:\v.mp4" --samples 200 --shots 12
+python $S transcribe "D:\v.mp4" --model small --language zh
+python $S captions   "D:\v.mp4" --step 0.6
+python $S audio      "D:\v.mp4"
 ```
 
-### Parameters
+Bundled bin (same thing, finds Python for you):
+
+```bash
+npx dsh-video-digest transcribe "D:\v.mp4" --language zh
+```
+
+## Commands
+
+### `doctor` / `setup`
+
+| Flag | Meaning |
+| --- | --- |
+| `doctor --json` | machine-readable dependency report |
+| `setup --with-asr` | install core + ASR dependencies |
+| `setup --mirror URL` | pip index mirror |
+| `setup --force` | reinstall even if present |
+
+### `frames`
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--samples` | 120 | frames decoded for scoring (more = better change detection, slower) |
-| `--shots` | 9 | keyframes written out |
-| `--start` / `--end` | full clip | process a section only (seconds) |
-| `--out` | `./video-digest/<name>` | output directory |
+| `--samples` | 120 | frames decoded for scoring |
+| `--shots` | 9 | keyframes written |
+| `--start` / `--end` | whole clip | section only (seconds) |
+| `--max-width` | 1280 | keyframe width cap |
 | `--json` | off | machine-readable result |
 
-Rough timings: 1 min 1080p ≈ 10 s, 10 min ≈ 40 s on a normal desktop.
+### `transcribe`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--model` | `small` | `base` fast/rough · `small` recommended · `medium`/`large-v3` slower, better |
+| `--language` | auto | `zh` for Chinese |
+| `--device` | `cpu` | `cuda` if you have an NVIDIA GPU |
+| `--compute-type` | `int8` | `float16` on GPU |
+| `--prompt` | — | initial prompt, helps punctuation/context |
+| `--start` / `--end` | whole clip | timestamps stay absolute |
+
+Model download sizes: `base` ≈ 145 MB, `small` ≈ 460 MB, `medium` ≈ 1.5 GB.
+CPU speed reference: 5–6 min of audio with `small` int8 ≈ 1–3 min.
+
+### `captions`
+
+Extracts text burned into the picture (the "gameplay background + hard subtitles" genre).
+Flags: `--step 0.6`, `--band-top 0.66`, `--band-bottom 0.995`, `--min-pixels 400`,
+`--diff 0.30`, `--per-sheet 8`. Bright HUD elements can cause false positives; raise
+`--min-pixels` / `--diff` or narrow the band.
 
 ## Output
 
 ```
 <out>/
   frames/frame_01_000008213ms.jpg   # timecoded keyframes
-  contact_sheet.jpg                 # 3-column sheet with timecodes
-  summary.json                      # metadata + per-shot time/score/path
-  audio_16k_mono.wav                # audio mode only
+  contact_sheet.jpg                 # 3-column sheet
+  summary.json                      # metadata + per-shot time/score
+  audio_16k_mono.wav                # 16 kHz mono (ASR input)
+  transcript_small.txt / .json      # [start-end] text segments
+  captions/subs_01.jpg …            # caption strips
+  captions/captions.json            # caption timestamps
 ```
+
+## Why three layers
+
+A chat model cannot watch video or hear audio. The honest decomposition is:
+
+- **picture** — sample frames, score change, show the model a handful of images;
+- **sound** — transcribe locally, give the model text with timecodes;
+- **hard subtitles** — when the text is already on the pixels, extract it instead of
+  transcribing (no model download, works offline).
+
+The skill tells the agent which layer to pick, and forbids inventing what it did not observe.
 
 ## Limitations
 
-- **Visual only.** There is no speech-to-text in this plugin; audio is exported as a 16 kHz
-  mono WAV so you can feed it to Whisper or any ASR. The skill explicitly forbids inventing
-  dialogue.
-- Keyframes are discrete: motion between them is not observed. The skill instructs the model
-  to say so instead of hallucinating.
-- Scene-change scoring is a histogram + pixel-diff heuristic. It works well on cuts and
-  strong motion; static footage needs a higher `--shots`.
-- No GPU, no OCR fallback, no subtitle extraction (yet).
+- Frames are discrete; motion between them is not observed. The skill requires the agent to
+  say so instead of hallucinating.
+- ASR is a model: homophones and proper nouns can be wrong. Quotes should be treated as
+  raw material, corrected from context or picture.
+- `captions` uses a brightness/saturation heuristic; game HUDs produce false positives.
+- No GPU required, but no GPU acceleration is enabled by default.
+- Transcription is local (nothing uploaded), yet transcripts are written to disk — clean up
+  if the material is private.
 
 ## Development
 
 ```bash
-npm pack                    # produces dsh-video-digest-0.1.0.tgz
-node --check lib/index.js   # plugin entry is plain ESM, no build step
+npm pack
+node --check lib/index.js
 python -m py_compile skills/video-digest/scripts/video_digest.py
+python skills/video-digest/scripts/video_digest.py doctor
 ```
 
-Local loop: install the tarball in the DSH plugin manager, then ask an agent to summarise a
-video. The skill body lives in `skills/video-digest/SKILL.md` — edit it and the change is
-picked up on the next session (install refreshes the package copy).
+Skill body: `skills/video-digest/SKILL.md`. Plugin entry: `lib/index.js` (registers the skill
+into `ctx.skills` with the package's `skills/video-digest` directory as `resourceBase`).
 
 ## License
 
