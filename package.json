@@ -1,0 +1,62 @@
+{
+  "name": "dsh-video-digest",
+  "version": "0.1.0",
+  "description": "视频快速提炼：探测元数据、按场景变化抽关键帧、生成带时间码的拼图交给多模态 agent 看，可导出音轨给 ASR。给 DeepSeek Harness 增加 video-digest 技能。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-video-digest": "lib/cli.js"
+  },
+  "files": [
+    "lib",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "video",
+    "keyframe",
+    "video-summary",
+    "video-understanding",
+    "multimodal",
+    "skill"
+  ],
+  "homepage": "https://github.com/Snutree/dsh-video-digest#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Snutree/dsh-video-digest.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Snutree/dsh-video-digest/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.1-rc.3": "compatible",
+        "0.2.2-alpha.2": "compatible",
+        "0.2.2-rc.1": "compatible"
+      }
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.4"
+  }
+}
